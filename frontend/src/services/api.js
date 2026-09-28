@@ -7,6 +7,20 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401 && !error.config?.url?.includes('/auth/login')) {
+      localStorage.removeItem('campusflow_token');
+      localStorage.removeItem('campusflow_user');
+      window.dispatchEvent(new CustomEvent('campusflow:unauthorized', {
+        detail: error.response?.data?.detail || 'Session expired. Please sign in again.'
+      }));
+    }
+    return Promise.reject(error);
+  }
+)
+
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
   register: (data) => api.post('/auth/register', data),
@@ -23,5 +37,17 @@ export const gmailApi = {
   authorize: () => api.get('/integrations/gmail/authorize'),
   status: () => api.get('/integrations/gmail/status'),
   sync: () => api.post('/integrations/gmail/sync'),
+}
+export const tierApi = {
+  getStatus: () => api.get('/tier/status'),
+  switchTier: (tier, userId) => api.post('/tier/switch', { tier, user_id: userId }),
+  adminSwitchTier: (data) => api.post('/admin/tier/switch', data),
+  adminResetQuota: (userId) => api.post('/admin/quota/reset', { user_id: userId }),
+  adminListUsers: () => api.get('/admin/users'),
+}
+export const paymentApi = {
+  createOrder: (tier = 'pro') => api.post('/payments/create-order', { tier }),
+  verify: (data) => api.post('/payments/verify', data),
+  getHistory: () => api.get('/payments/history'),
 }
 export default api
