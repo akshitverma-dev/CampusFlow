@@ -15,12 +15,21 @@ class Settings(BaseSettings):
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str = "http://localhost:8000/api/integrations/gmail/callback"
+    shared_gmail_refresh_token: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 settings = Settings()
-engine = create_engine(settings.database_url, pool_pre_ping=True)
+
+# Normalize database URL for cloud providers (Neon, Supabase, Render, Railway, etc.)
+raw_db_url = settings.database_url
+if raw_db_url.startswith("postgres://"):
+    raw_db_url = raw_db_url.replace("postgres://", "postgresql+psycopg://", 1)
+elif raw_db_url.startswith("postgresql://") and not raw_db_url.startswith("postgresql+psycopg://"):
+    raw_db_url = raw_db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+engine = create_engine(raw_db_url, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 

@@ -91,6 +91,7 @@ class SyncResponse(BaseModel):
     daily_limit: int = 5
     remaining_scans: int = 5
     tier: str = "free"
+    message: str | None = None
 
 
 class TierPlan(BaseModel):

@@ -37,6 +37,7 @@ export const gmailApi = {
   authorize: () => api.get('/integrations/gmail/authorize'),
   status: () => api.get('/integrations/gmail/status'),
   sync: () => api.post('/integrations/gmail/sync'),
+  disconnect: () => api.post('/integrations/gmail/disconnect'),
 }
 export const tierApi = {
   getStatus: () => api.get('/tier/status'),
