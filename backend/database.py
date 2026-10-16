@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     frontend_origin: str = "http://localhost:5173"
     google_client_id: str | None = None
     google_client_secret: str | None = None
-    google_redirect_uri: str = "http://localhost:8000/api/integrations/gmail/callback"
+    google_redirect_uri: str = "https://campusflow-9bsk.onrender.com/api/integrations/gmail/callback"
     shared_gmail_refresh_token: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
