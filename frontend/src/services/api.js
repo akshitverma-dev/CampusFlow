@@ -34,7 +34,9 @@ export const taskApi = {
 export const calendarApi = { list: () => api.get('/calendar') }
 export const emailApi = { sync: (emails) => api.post('/emails/sync', { emails }) }
 export const gmailApi = {
-  authorize: () => api.get('/integrations/gmail/authorize'),
+  authorize: () => api.get('/integrations/gmail/authorize', {
+    params: { redirect_to: typeof window !== 'undefined' ? window.location.origin : undefined }
+  }),
   status: () => api.get('/integrations/gmail/status'),
   sync: () => api.post('/integrations/gmail/sync'),
   disconnect: () => api.post('/integrations/gmail/disconnect'),

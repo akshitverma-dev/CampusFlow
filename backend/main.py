@@ -170,17 +170,46 @@ async def sync_emails(payload: schemas.SyncRequest, current_user: models.User = 
 
 
 @app.get("/api/integrations/gmail/authorize")
-def gmail_authorize(current_user: models.User = Depends(get_current_user)):
-    state = jwt.encode({"sub": str(current_user.id), "purpose": "gmail", "exp": datetime.now(timezone.utc) + timedelta(minutes=10)}, settings.secret_key, algorithm="HS256")
+def gmail_authorize(current_user: models.User = Depends(get_current_user), redirect_to: str | None = None):
+    state_payload = {
+        "sub": str(current_user.id),
+        "purpose": "gmail",
+        "redirect_to": redirect_to,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=10)
+    }
+    state = jwt.encode(state_payload, settings.secret_key, algorithm="HS256")
     try:
         return {"authorization_url": create_authorization_url(state)}
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
 
+def _resolve_frontend_url(redirect_to: str | None = None) -> str:
+    if redirect_to and redirect_to.startswith("http"):
+        return redirect_to.rstrip("/")
+    raw = settings.frontend_origin or "http://localhost:5173"
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    for p in parts:
+        if "your-app-name" not in p and p.startswith("http"):
+            return p.rstrip("/")
+    for p in parts:
+        if "your-app-name" not in p:
+            return f"https://{p}".rstrip("/")
+    return "http://localhost:5173"
+
+
 @app.get("/api/integrations/gmail/callback")
 def gmail_callback(code: str | None = None, state: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
-    destination = f"{settings.frontend_origin}/settings?gmail={'error' if error else 'connected'}"
+    redirect_target = None
+    if state:
+        try:
+            payload = jwt.decode(state, settings.secret_key, algorithms=["HS256"])
+            redirect_target = payload.get("redirect_to")
+        except Exception:
+            pass
+
+    base_frontend = _resolve_frontend_url(redirect_target)
+    destination = f"{base_frontend}/settings?gmail={'error' if error else 'connected'}"
     if error or not code or not state:
         return RedirectResponse(destination)
     try:
@@ -193,7 +222,7 @@ def gmail_callback(code: str | None = None, state: str | None = None, error: str
         user.gmail_refresh_token = exchange_code(code, state)
         db.commit()
     except (JWTError, ValueError, RuntimeError):
-        destination = f"{settings.frontend_origin}/settings?gmail=error"
+        destination = f"{base_frontend}/settings?gmail=error"
     return RedirectResponse(destination)
 
 
