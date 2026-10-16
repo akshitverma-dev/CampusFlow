@@ -95,9 +95,12 @@ allowed_origins = [orig.strip() for orig in settings.frontend_origin.split(",") 
 app.add_middleware(CORSMiddleware, allow_origins=allowed_origins if allowed_origins else ["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
+@app.get("/")
+@app.head("/")
 @app.get("/api/health")
+@app.head("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "service": "CampusFlow API"}
 
 
 @app.post("/api/auth/register", response_model=schemas.TokenResponse, status_code=201)
