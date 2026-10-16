@@ -197,101 +197,11 @@ def gmail_callback(code: str | None = None, state: str | None = None, error: str
     return RedirectResponse(destination)
 
 
-def get_effective_gmail_credentials(current_user: models.User, db: Session) -> tuple[str | None, str]:
-    if current_user.gmail_refresh_token:
-        return current_user.gmail_refresh_token, "personal"
-    if settings.shared_gmail_refresh_token:
-        return settings.shared_gmail_refresh_token, "shared_env"
-    admin_with_token = db.scalar(
-        select(models.User).where(models.User.is_admin == True, models.User.gmail_refresh_token.is_not(None))
-    )
-    if admin_with_token and admin_with_token.gmail_refresh_token:
-        return admin_with_token.gmail_refresh_token, "shared_admin"
-    return None, "simulated"
-
-
-def get_simulated_academic_messages(user_id: int, count: int = 5) -> list[dict]:
-    now = datetime.now(timezone.utc)
-    pool = [
-        {
-            "external_id": f"sim-{user_id}-cs301",
-            "sender": "Prof. David Vance <vance@cs.university.edu>",
-            "subject": "CS301: Project 2 Submission & Lab Exam Schedule",
-            "raw_body": (
-                "Dear Students,\n\n"
-                f"Please ensure Project 2 is submitted to your GitHub classroom by {(now + timedelta(days=3)).strftime('%A at 11:59 PM')}. "
-                "Late submissions receive a 10% penalty per day.\n\n"
-                f"Our Midterm Lab Exam will take place on {(now + timedelta(days=6)).strftime('%A at 2:00 PM')} in Lab Hall B. "
-                "Attendance is mandatory.\n\nBest,\nProf. Vance"
-            ),
-            "timestamp": now - timedelta(hours=3),
-        },
-        {
-            "external_id": f"sim-{user_id}-math204",
-            "sender": "Dr. Sarah Lin <slin@math.university.edu>",
-            "subject": "MATH204: Problem Set 4 (Eigenvalues & Linear Models)",
-            "raw_body": (
-                "Hi Class,\n\n"
-                f"Problem Set 4 has been posted on Canvas. It is due {(now + timedelta(days=4)).strftime('%A at 5:00 PM')}. "
-                "You must show all intermediate matrix decompositions for full credit.\n\n"
-                "Office hours are tomorrow from 3-5 PM.\nDr. Lin"
-            ),
-            "timestamp": now - timedelta(hours=7),
-        },
-        {
-            "external_id": f"sim-{user_id}-phys102",
-            "sender": "Physics Dept <physics-labs@university.edu>",
-            "subject": "PHYS102: Lab Report 3 (Optics & Wave Interference)",
-            "raw_body": (
-                "All PHYS102 Students,\n\n"
-                f"Submit your formal lab writeup for Experiment 3 by {(now + timedelta(days=5)).strftime('%A at 11:59 PM')} via Gradescope. "
-                "Include all error analysis calculations and signed TA verification sheets.\n\n"
-                "— Physics Department"
-            ),
-            "timestamp": now - timedelta(hours=14),
-        },
-        {
-            "external_id": f"sim-{user_id}-eng210",
-            "sender": "Prof. Robert Thorne <rthorne@lit.university.edu>",
-            "subject": "ENG210: Critical Essay Rough Draft Due",
-            "raw_body": (
-                "Hello everyone,\n\n"
-                f"A quick reminder that your 1,500-word research draft is due this {(now + timedelta(days=2)).strftime('%A at 8:00 PM')}. "
-                "Please bring two printed copies to class for in-person peer review.\n\n"
-                "Regards,\nProf. Thorne"
-            ),
-            "timestamp": now - timedelta(hours=22),
-        },
-        {
-            "external_id": f"sim-{user_id}-chem105",
-            "sender": "Chemistry Instructional Team <announcements@chem.university.edu>",
-            "subject": "CHEM105: Chapter 6 Quiz Announcement",
-            "raw_body": (
-                "Attention Students,\n\n"
-                f"The Chapter 6 Thermodynamics Quiz will open tomorrow morning and closes on {(now + timedelta(days=1)).strftime('%A at 11:59 PM')}. "
-                "The quiz is 45 minutes once started. Please prepare your formula sheets.\n\n"
-                "— Chem 105 Staff"
-            ),
-            "timestamp": now - timedelta(hours=28),
-        },
-    ]
-    return pool[:count]
-
-
 @app.get("/api/integrations/gmail/status")
-def gmail_status(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    token, source = get_effective_gmail_credentials(current_user, db)
+def gmail_status(current_user: models.User = Depends(get_current_user)):
     return {
-        "connected": True,
-        "source": source,
-        "has_personal": bool(current_user.gmail_refresh_token),
-        "is_shared": source in ("shared_admin", "shared_env"),
-        "is_simulated": source == "simulated",
-        "description": (
-            "Connected to your personal Gmail account." if source == "personal" else
-            "Connected to CampusFlow Shared Academic Mailbox (No Google OAuth required)." if source in ("shared_admin", "shared_env") else
-            "Instant AI Academic Scanner Active (Zero Google OAuth required)."
-        )
+        "connected": bool(current_user.gmail_refresh_token),
+        "oauth_configured": bool(settings.google_client_id and settings.google_client_secret)
     }
 
 
@@ -304,21 +214,32 @@ def gmail_disconnect(current_user: models.User = Depends(get_current_user), db: 
 
 @app.post("/api/integrations/gmail/sync", response_model=schemas.SyncResponse)
 async def gmail_sync(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    token, source = get_effective_gmail_credentials(current_user, db)
+    if not current_user.gmail_refresh_token:
+        raise HTTPException(
+            status_code=400, 
+            detail="Your Gmail account is not connected. Please connect your Gmail via Google OAuth first."
+        )
+
     batch_target = current_user.daily_limit
     allowed_count = enforce_scan_quota(current_user, batch_target, db)
 
-    messages = []
-    if token:
-        try:
-            messages = await asyncio.to_thread(fetch_all_messages, token, allowed_count)
-        except Exception as exc:
-            if "quotaExceeded" in str(exc) or "Quota exceeded" in str(exc):
-                raise HTTPException(status_code=429, detail="Gmail quota is temporarily exhausted. Wait a few minutes, then sync again.")
-            messages = get_simulated_academic_messages(current_user.id, allowed_count)
-            source = "simulated"
-    else:
-        messages = get_simulated_academic_messages(current_user.id, allowed_count)
+    try:
+        messages = await asyncio.to_thread(fetch_all_messages, current_user.gmail_refresh_token, allowed_count)
+    except Exception as exc:
+        if "quotaExceeded" in str(exc) or "Quota exceeded" in str(exc):
+            raise HTTPException(status_code=429, detail="Gmail API quota exceeded. Please wait a few minutes, then sync again.")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch emails from your Gmail inbox: {exc}")
+
+    if not messages:
+        return {
+            "processed": 0,
+            "created_tasks": [],
+            "daily_scan_count": current_user.daily_scan_count,
+            "daily_limit": current_user.daily_limit,
+            "remaining_scans": current_user.remaining_scans,
+            "tier": current_user.tier,
+            "message": "No new academic messages found in your inbox."
+        }
 
     created: list[models.Task] = []
     for message in messages:
@@ -348,14 +269,6 @@ async def gmail_sync(current_user: models.User = Depends(get_current_user), db: 
                 }))
     crud.record_email_scans(current_user, len(messages), db)
 
-    source_labels = {
-        "personal": "Personal Gmail",
-        "shared_admin": "Campus Shared Mailbox",
-        "shared_env": "Campus Shared Mailbox",
-        "simulated": "Instant AI Academic Scanner"
-    }
-    source_label = source_labels.get(source, "Academic Scanner")
-
     return {
         "processed": len(messages),
         "created_tasks": created,
@@ -363,7 +276,7 @@ async def gmail_sync(current_user: models.User = Depends(get_current_user), db: 
         "daily_limit": current_user.daily_limit,
         "remaining_scans": current_user.remaining_scans,
         "tier": current_user.tier,
-        "message": f"Successfully processed {len(messages)} messages via {source_label}."
+        "message": f"Successfully synced {len(messages)} real emails from your Gmail inbox ({len(created)} task{'s' if len(created) != 1 else ''} created)."
     }
 
 

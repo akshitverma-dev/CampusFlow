@@ -27,9 +27,24 @@ export default function Tasks() {
     setMessage('')
     setError('')
     try {
+      const statusRes = await gmailApi.status()
+      if (!statusRes.data.connected) {
+        try {
+          const authRes = await gmailApi.authorize()
+          window.location.href = authRes.data.authorization_url
+          return
+        } catch (authErr) {
+          setError(
+            authErr.response?.data?.detail || 
+            'Gmail is not connected. Please configure Google OAuth in Settings to connect your real inbox.'
+          )
+          setScanning(false)
+          return
+        }
+      }
       const { data } = await gmailApi.sync()
       const count = data.created_tasks?.length || 0
-      setMessage(data.message || `Scanned ${data.processed} emails: created ${count} new task${count === 1 ? '' : 's'}!`)
+      setMessage(data.message || `Scanned ${data.processed} real emails: created ${count} new task${count === 1 ? '' : 's'}!`)
       load()
     } catch (err) {
       setError(err.response?.data?.detail || 'Email scan failed.')
