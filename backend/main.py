@@ -92,7 +92,14 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="CampusFlow API", version="1.0.0", lifespan=lifespan)
 allowed_origins = [orig.strip() for orig in settings.frontend_origin.split(",") if orig.strip()]
-app.add_middleware(CORSMiddleware, allow_origins=allowed_origins if allowed_origins else ["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins if allowed_origins else ["*"],
+    allow_origin_regex=r"^https?:\/\/.*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/")
