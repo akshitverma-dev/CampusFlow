@@ -1471,7 +1471,9 @@ const AuthModal = ({ isOpen, onClose, onAuth, initialMode = 'login', onModeChang
       onAuth(data.user);
       onClose();
     } catch (err) {
-      setError(err.response?.data?.detail || 'Unable to authenticate. Please check your credentials.');
+      const detail = err.response?.data?.detail;
+      const networkError = err.message === 'Network Error' ? 'Network error: could not connect to backend server. Please verify your connection.' : null;
+      setError(detail || networkError || err.message || 'Unable to authenticate. Please check your credentials.');
     } finally {
       setLoading(false);
     }
