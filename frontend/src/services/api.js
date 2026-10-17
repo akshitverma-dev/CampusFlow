@@ -1,36 +1,68 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'https://campusflow-9bsk.onrender.com/api' })
+const baseURL = import.meta.env.VITE_API_URL || 'https://campusflow-9bsk.onrender.com/api'
+const api = axios.create({ baseURL })
+
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('campusflow_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
   return config
 })
 
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && !error.config?.url?.includes('/auth/login')) {
-      localStorage.removeItem('campusflow_token');
-      localStorage.removeItem('campusflow_user');
-      window.dispatchEvent(new CustomEvent('campusflow:unauthorized', {
-        detail: error.response?.data?.detail || 'Session expired. Please sign in again.'
-      }));
+    if (
+      error.response?.status === 401 && 
+      !error.config?.url?.includes('/auth/login') && 
+      !error.config?.url?.includes('/auth/register')
+    ) {
+      localStorage.removeItem('campusflow_token')
+      localStorage.removeItem('campusflow_user')
+      window.dispatchEvent(
+        new CustomEvent('campusflow:unauthorized', {
+          detail: error.response?.data?.detail || 'Session expired. Please sign in again.'
+        })
+      )
     }
-    return Promise.reject(error);
+    return Promise.reject(error)
   }
 )
 
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
   register: (data) => api.post('/auth/register', data),
+  demo: async () => {
+    try {
+      return await api.get('/auth/demo')
+    } catch (err) {
+      if (err.response?.status === 404) {
+        try {
+          return await api.post('/auth/login', {
+            email: 'demo.student@campusflow.edu',
+            password: 'demo12345'
+          })
+        } catch (loginErr) {
+          return await api.post('/auth/register', {
+            email: 'demo.student@campusflow.edu',
+            password: 'demo12345'
+          })
+        }
+      }
+      throw err
+    }
+  },
 }
+
 export const taskApi = {
   list: (params) => api.get('/tasks', { params }),
   create: (data) => api.post('/tasks', data),
   update: (id, data) => api.patch(`/tasks/${id}`, data),
   remove: (id) => api.delete(`/tasks/${id}`),
 }
+
 export const calendarApi = { list: () => api.get('/calendar') }
 export const emailApi = { sync: (emails) => api.post('/emails/sync', { emails }) }
 export const gmailApi = {
@@ -41,6 +73,7 @@ export const gmailApi = {
   sync: () => api.post('/integrations/gmail/sync'),
   disconnect: () => api.post('/integrations/gmail/disconnect'),
 }
+
 export const tierApi = {
   getStatus: () => api.get('/tier/status'),
   switchTier: (tier, userId) => api.post('/tier/switch', { tier, user_id: userId }),
@@ -48,9 +81,11 @@ export const tierApi = {
   adminResetQuota: (userId) => api.post('/admin/quota/reset', { user_id: userId }),
   adminListUsers: () => api.get('/admin/users'),
 }
+
 export const paymentApi = {
   createOrder: (tier = 'pro') => api.post('/payments/create-order', { tier }),
   verify: (data) => api.post('/payments/verify', data),
   getHistory: () => api.get('/payments/history'),
 }
+
 export default api
