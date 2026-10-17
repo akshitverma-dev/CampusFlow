@@ -9,7 +9,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 from sqlalchemy.orm import Session
 
 import crud
@@ -55,17 +55,18 @@ async def urgency_worker() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
-    with engine.begin() as connection:
-        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_refresh_token TEXT"))
-        connection.execute(text("ALTER TABLE emails ADD COLUMN IF NOT EXISTS external_id VARCHAR(255)"))
-        connection.execute(text("ALTER TABLE emails ADD COLUMN IF NOT EXISTS parser_checked BOOLEAN NOT NULL DEFAULT FALSE"))
-        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS tier VARCHAR(20) NOT NULL DEFAULT 'free'"))
-        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
-        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_scan_count INTEGER NOT NULL DEFAULT 0"))
-        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_scan_date DATE"))
-        connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20) NOT NULL DEFAULT 'active'"))
-        connection.execute(text("UPDATE users SET is_admin = FALSE WHERE email != 'admin@campusflow.edu'"))
-        connection.execute(text("UPDATE users SET tier = 'free' WHERE email = 'belphegor113666131@gmail.com'"))
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_refresh_token TEXT"))
+            connection.execute(text("ALTER TABLE emails ADD COLUMN IF NOT EXISTS external_id VARCHAR(255)"))
+            connection.execute(text("ALTER TABLE emails ADD COLUMN IF NOT EXISTS parser_checked BOOLEAN NOT NULL DEFAULT FALSE"))
+            connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS tier VARCHAR(20) NOT NULL DEFAULT 'free'"))
+            connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"))
+            connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_scan_count INTEGER NOT NULL DEFAULT 0"))
+            connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_scan_date DATE"))
+            connection.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20) NOT NULL DEFAULT 'active'"))
+            connection.execute(text("UPDATE users SET is_admin = FALSE WHERE email != 'admin@campusflow.edu'"))
+            connection.execute(text("UPDATE users SET tier = 'free' WHERE email = 'belphegor113666131@gmail.com'"))
     with SessionLocal() as db:
         admin_user = crud.get_user_by_email(db, "admin@campusflow.edu")
         if not admin_user:
@@ -92,22 +93,12 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="CampusFlow API", version="1.0.0", lifespan=lifespan)
 allowed_origins = [orig.strip() for orig in settings.frontend_origin.split(",") if orig.strip()]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins if allowed_origins else ["*"],
-    allow_origin_regex=r"^https?:\/\/.*",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, allow_origins=allowed_origins if allowed_origins else ["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
-@app.get("/")
-@app.head("/")
 @app.get("/api/health")
-@app.head("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "CampusFlow API"}
+    return {"status": "ok"}
 
 
 @app.post("/api/auth/register", response_model=schemas.TokenResponse, status_code=201)
@@ -123,6 +114,28 @@ def login(payload: schemas.UserLogin, db: Session = Depends(get_db)):
     user = crud.get_user_by_email(db, payload.email)
     if not user or not pwd_context.verify(payload.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
+    return {"access_token": create_access_token(user.id), "user": user}
+
+
+@app.get("/api/auth/demo", response_model=schemas.TokenResponse)
+def demo_auth(db: Session = Depends(get_db)):
+    email = "demo.student@campusflow.edu"
+    user = crud.get_user_by_email(db, email)
+    now = datetime.now(timezone.utc)
+    if not user:
+        user = models.User(
+            email=email,
+            hashed_password=pwd_context.hash("demo12345"),
+            is_admin=False,
+            tier="free",
+            daily_scan_count=0,
+            last_scan_date=now.date(),
+            subscription_status="active"
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
     return {"access_token": create_access_token(user.id), "user": user}
 
 
@@ -170,46 +183,22 @@ async def sync_emails(payload: schemas.SyncRequest, current_user: models.User = 
 
 
 @app.get("/api/integrations/gmail/authorize")
-def gmail_authorize(current_user: models.User = Depends(get_current_user), redirect_to: str | None = None):
-    state_payload = {
-        "sub": str(current_user.id),
-        "purpose": "gmail",
-        "redirect_to": redirect_to,
-        "exp": datetime.now(timezone.utc) + timedelta(minutes=10)
-    }
-    state = jwt.encode(state_payload, settings.secret_key, algorithm="HS256")
+def gmail_authorize(current_user: models.User = Depends(get_current_user)):
+    if not settings.google_client_id or not settings.google_client_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="Google OAuth is not configured on this server. Please set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in backend .env."
+        )
+    state = jwt.encode({"sub": str(current_user.id), "purpose": "gmail", "exp": datetime.now(timezone.utc) + timedelta(minutes=10)}, settings.secret_key, algorithm="HS256")
     try:
         return {"authorization_url": create_authorization_url(state)}
-    except RuntimeError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-
-
-def _resolve_frontend_url(redirect_to: str | None = None) -> str:
-    if redirect_to and redirect_to.startswith("http"):
-        return redirect_to.rstrip("/")
-    raw = settings.frontend_origin or "http://localhost:5173"
-    parts = [p.strip() for p in raw.split(",") if p.strip()]
-    for p in parts:
-        if "your-app-name" not in p and p.startswith("http"):
-            return p.rstrip("/")
-    for p in parts:
-        if "your-app-name" not in p:
-            return f"https://{p}".rstrip("/")
-    return "http://localhost:5173"
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/integrations/gmail/callback")
 def gmail_callback(code: str | None = None, state: str | None = None, error: str | None = None, db: Session = Depends(get_db)):
-    redirect_target = None
-    if state:
-        try:
-            payload = jwt.decode(state, settings.secret_key, algorithms=["HS256"])
-            redirect_target = payload.get("redirect_to")
-        except Exception:
-            pass
-
-    base_frontend = _resolve_frontend_url(redirect_target)
-    destination = f"{base_frontend}/settings?gmail={'error' if error else 'connected'}"
+    destination = f"{settings.frontend_origin}/settings?gmail={'error' if error else 'connected'}"
     if error or not code or not state:
         return RedirectResponse(destination)
     try:
@@ -222,15 +211,41 @@ def gmail_callback(code: str | None = None, state: str | None = None, error: str
         user.gmail_refresh_token = exchange_code(code, state)
         db.commit()
     except (JWTError, ValueError, RuntimeError):
-        destination = f"{base_frontend}/settings?gmail=error"
+        destination = f"{settings.frontend_origin}/settings?gmail=error"
     return RedirectResponse(destination)
 
 
+def get_effective_gmail_credentials(current_user: models.User, db: Session) -> tuple[str | None, str]:
+    if current_user.gmail_refresh_token:
+        return current_user.gmail_refresh_token, "personal"
+    if settings.shared_gmail_refresh_token:
+        return settings.shared_gmail_refresh_token, "shared_env"
+    admin_with_token = db.scalar(
+        select(models.User).where(models.User.is_admin == True, models.User.gmail_refresh_token.is_not(None))
+    )
+    if admin_with_token and admin_with_token.gmail_refresh_token:
+        return admin_with_token.gmail_refresh_token, "shared_admin"
+    return None, "none"
+
+
 @app.get("/api/integrations/gmail/status")
-def gmail_status(current_user: models.User = Depends(get_current_user)):
+def gmail_status(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
+    token, source = get_effective_gmail_credentials(current_user, db)
+    is_connected = bool(token)
+    oauth_configured = bool(settings.google_client_id and settings.google_client_secret)
     return {
-        "connected": bool(current_user.gmail_refresh_token),
-        "oauth_configured": bool(settings.google_client_id and settings.google_client_secret)
+        "connected": is_connected,
+        "source": source,
+        "has_personal": bool(current_user.gmail_refresh_token),
+        "is_shared": source in ("shared_admin", "shared_env"),
+        "is_simulated": False,
+        "oauth_configured": oauth_configured,
+        "description": (
+            "Connected to your personal Gmail account. Ready to scan." if source == "personal" else
+            "Connected to CampusFlow Shared Academic Mailbox." if source in ("shared_admin", "shared_env") else
+            ("Google OAuth is configured and ready. Click 'Link Personal Gmail' below to connect." if oauth_configured else
+             "Google OAuth credentials (Client ID / Secret) need to be configured in backend .env.")
+        )
     }
 
 
@@ -243,21 +258,28 @@ def gmail_disconnect(current_user: models.User = Depends(get_current_user), db: 
 
 @app.post("/api/integrations/gmail/sync", response_model=schemas.SyncResponse)
 async def gmail_sync(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not current_user.gmail_refresh_token:
+    token, source = get_effective_gmail_credentials(current_user, db)
+    if not token:
+        oauth_configured = bool(settings.google_client_id and settings.google_client_secret)
+        if not oauth_configured:
+            raise HTTPException(
+                status_code=400,
+                detail="Google OAuth is not configured on the server yet. Please add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to backend .env, or use the Manual Single Email Scan below."
+            )
         raise HTTPException(
-            status_code=400, 
-            detail="Your Gmail account is not connected. Please connect your Gmail via Google OAuth first."
+            status_code=400,
+            detail="No Gmail account connected. Click 'Link Personal Gmail' in Settings to connect your university inbox, or paste text in the Manual Single Email Scan below."
         )
 
     batch_target = current_user.daily_limit
     allowed_count = enforce_scan_quota(current_user, batch_target, db)
 
     try:
-        messages = await asyncio.to_thread(fetch_all_messages, current_user.gmail_refresh_token, allowed_count)
+        messages = await asyncio.to_thread(fetch_all_messages, token, allowed_count)
     except Exception as exc:
         if "quotaExceeded" in str(exc) or "Quota exceeded" in str(exc):
-            raise HTTPException(status_code=429, detail="Gmail API quota exceeded. Please wait a few minutes, then sync again.")
-        raise HTTPException(status_code=502, detail=f"Failed to fetch emails from your Gmail inbox: {exc}")
+            raise HTTPException(status_code=429, detail="Gmail API quota is temporarily exhausted. Wait a few minutes, then sync again.")
+        raise HTTPException(status_code=400, detail=f"Failed to fetch emails from Gmail: {str(exc)}. Try reconnecting your Gmail in Settings.")
 
     if not messages:
         return {
@@ -267,7 +289,7 @@ async def gmail_sync(current_user: models.User = Depends(get_current_user), db: 
             "daily_limit": current_user.daily_limit,
             "remaining_scans": current_user.remaining_scans,
             "tier": current_user.tier,
-            "message": "No new academic messages found in your inbox."
+            "message": "No new unparsed academic emails found in your Gmail inbox."
         }
 
     created: list[models.Task] = []
@@ -305,7 +327,7 @@ async def gmail_sync(current_user: models.User = Depends(get_current_user), db: 
         "daily_limit": current_user.daily_limit,
         "remaining_scans": current_user.remaining_scans,
         "tier": current_user.tier,
-        "message": f"Successfully synced {len(messages)} real emails from your Gmail inbox ({len(created)} task{'s' if len(created) != 1 else ''} created)."
+        "message": f"Scanned {len(messages)} emails from Gmail: created {len(created)} new task{'s' if len(created) != 1 else ''}."
     }
 
 

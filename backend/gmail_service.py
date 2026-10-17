@@ -18,38 +18,20 @@ def _fernet() -> Fernet:
     return Fernet(key)
 
 
-def _clean_credentials() -> tuple[str, str, str]:
-    client_id = (settings.google_client_id or "").strip()
-    client_secret = (settings.google_client_secret or "").strip()
-    redirect_uri = (settings.google_redirect_uri or "https://campusflow-9bsk.onrender.com/api/integrations/gmail/callback").strip()
-    return client_id, client_secret, redirect_uri
-
-
 def _client_config() -> dict:
-    client_id, client_secret, redirect_uri = _clean_credentials()
-    if not client_id or not client_secret:
+    if not settings.google_client_id or not settings.google_client_secret:
         raise RuntimeError("Google OAuth credentials are not configured")
-    return {
-        "web": {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "redirect_uris": [redirect_uri],
-        }
-    }
+    return {"web": {"client_id": settings.google_client_id, "client_secret": settings.google_client_secret, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "redirect_uris": [settings.google_redirect_uri]}}
 
 
 def create_authorization_url(state: str) -> str:
-    _, _, redirect_uri = _clean_credentials()
-    flow = Flow.from_client_config(_client_config(), scopes=GMAIL_SCOPES, state=state, redirect_uri=redirect_uri)
+    flow = Flow.from_client_config(_client_config(), scopes=GMAIL_SCOPES, state=state, redirect_uri=settings.google_redirect_uri)
     url, _ = flow.authorization_url(access_type="offline", prompt="consent", include_granted_scopes="true")
     return url
 
 
 def exchange_code(code: str, state: str) -> str:
-    _, _, redirect_uri = _clean_credentials()
-    flow = Flow.from_client_config(_client_config(), scopes=GMAIL_SCOPES, state=state, redirect_uri=redirect_uri)
+    flow = Flow.from_client_config(_client_config(), scopes=GMAIL_SCOPES, state=state, redirect_uri=settings.google_redirect_uri)
     flow.fetch_token(code=code)
     if not flow.credentials.refresh_token:
         raise RuntimeError("Google did not return a refresh token; revoke the app access and reconnect")
