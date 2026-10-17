@@ -228,9 +228,14 @@ def gmail_callback(code: str | None = None, state: str | None = None, error: str
 
 @app.get("/api/integrations/gmail/status")
 def gmail_status(current_user: models.User = Depends(get_current_user)):
+    is_connected = bool(current_user.gmail_refresh_token)
     return {
-        "connected": bool(current_user.gmail_refresh_token),
-        "oauth_configured": bool(settings.google_client_id and settings.google_client_secret)
+        "connected": is_connected,
+        "has_personal": is_connected,
+        "is_shared": False,
+        "is_simulated": False,
+        "oauth_configured": bool(settings.google_client_id and settings.google_client_secret),
+        "email": current_user.email
     }
 
 
@@ -298,6 +303,12 @@ async def gmail_sync(current_user: models.User = Depends(get_current_user), db: 
                 }))
     crud.record_email_scans(current_user, len(messages), db)
 
+    message_text = (
+        f"Successfully synced {len(messages)} real emails from your Gmail inbox ({len(created)} task{'s' if len(created) != 1 else ''} created)."
+        if created else
+        f"Scanned {len(messages)} recent emails, but none contained upcoming assignments or deadlines."
+    )
+
     return {
         "processed": len(messages),
         "created_tasks": created,
@@ -305,7 +316,7 @@ async def gmail_sync(current_user: models.User = Depends(get_current_user), db: 
         "daily_limit": current_user.daily_limit,
         "remaining_scans": current_user.remaining_scans,
         "tier": current_user.tier,
-        "message": f"Successfully synced {len(messages)} real emails from your Gmail inbox ({len(created)} task{'s' if len(created) != 1 else ''} created)."
+        "message": message_text
     }
 
 

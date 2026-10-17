@@ -36,7 +36,7 @@ import Dashboard from './pages/Dashboard';
 import Tasks from './pages/Tasks';
 import CalendarView from './pages/CalendarView';
 import Settings from './pages/Settings';
-import { authApi, gmailApi } from './services/api';
+import { authApi, gmailApi, taskApi } from './services/api';
 
 // --- Aesthetic Main Website Navbar (Matching Dashboard Identity) ---
 const WebsiteNavbar = ({ onOpenDashboard, onOpenAuth, user, onLogout, theme, onToggleTheme }) => {
@@ -601,6 +601,16 @@ function WorkspaceLayout({
   const location = useLocation();
   const [isSyncing, setIsSyncing] = useState(false);
   const [showRightPanel, setShowRightPanel] = useState(true);
+  const [tasks, setTasks] = useState([]);
+
+  useEffect(() => {
+    taskApi.list()
+      .then(({ data }) => setTasks(data || []))
+      .catch(() => {});
+  }, [location.pathname]);
+
+  const pendingTasksCount = tasks.filter((t) => t.status !== 'completed').length;
+  const urgentTasksCount = tasks.filter((t) => (t.urgency === 'high' || t.urgency === 'critical') && t.status !== 'completed').length;
 
   // Derive route name for breadcrumb
   const routeName = location.pathname === '/' 
@@ -624,7 +634,7 @@ function WorkspaceLayout({
       <Sidebar 
         user={user} 
         onLogout={onLogout} 
-        taskCount={8} 
+        taskCount={pendingTasksCount} 
         onSelectOverview={onSelectOverview}
       />
 
@@ -637,13 +647,14 @@ function WorkspaceLayout({
           onSyncEmails={handleSyncEmails}
           isSyncing={isSyncing}
           onToggleRightPanel={() => setShowRightPanel((prev) => !prev)}
+          unreadCount={urgentTasksCount}
           onBackToLanding={onBackToLanding}
         />
 
         {/* Dynamic Page View */}
         <main className="flex-1 overflow-y-auto p-6 md:p-8">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<Dashboard user={user} />} />
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/calendar" element={<CalendarView />} />
             <Route path="/settings" element={<Settings user={user} />} />

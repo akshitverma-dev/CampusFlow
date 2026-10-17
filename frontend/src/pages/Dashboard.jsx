@@ -14,6 +14,7 @@ import {
   Star,
   Zap,
   Mail,
+  GraduationCap,
   AlertCircle
 } from 'lucide-react'
 import { taskApi, gmailApi } from '../services/api'
@@ -27,7 +28,7 @@ const formatDate = (value) => {
   }).format(date)
 }
 
-export default function Dashboard() {
+export default function Dashboard({ user }) {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
   const [scanning, setScanning] = useState(false)
@@ -36,7 +37,7 @@ export default function Dashboard() {
 
   const loadTasks = () => {
     taskApi.list()
-      .then(({ data }) => setTasks(data))
+      .then(({ data }) => setTasks(data || []))
       .catch(() => {})
       .finally(() => setLoading(false))
   }
@@ -56,7 +57,7 @@ export default function Dashboard() {
       )
       loadTasks()
     } catch (err) {
-      setScanMessage(err.response?.data?.detail || 'Could not scan emails.')
+      setScanMessage(err.response?.data?.detail || 'Could not scan emails. Ensure your Gmail is connected in Settings.')
     } finally {
       setScanning(false)
     }
@@ -77,7 +78,7 @@ export default function Dashboard() {
   const dueSoonTasks = pendingTasks.filter((t) => t.urgency === 'high' || t.urgency === 'critical')
   const completionRate = tasks.length ? Math.round((completedTasks.length / tasks.length) * 100) : 0
 
-  // Coursework breakdown metrics
+  // Coursework breakdown metrics directly from real user tasks
   const courseCounts = tasks.reduce((acc, t) => {
     const code = t.course_code || 'General'
     acc[code] = (acc[code] || 0) + 1
@@ -88,7 +89,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6 select-none">
-      {/* Title Row with Date Dropdown (Matching Reference Image) */}
+      {/* Title Row with Date Dropdown */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl md:text-2xl font-extrabold dark:text-white text-slate-900 tracking-tight">
           Overview
@@ -109,7 +110,7 @@ export default function Dashboard() {
       {/* Scan Status Toast Banner */}
       {scanMessage && (
         <div className={`p-4 rounded-2xl border text-xs flex items-center justify-between shadow-sm ${
-          scanMessage.includes('created') || scanMessage.includes('Scanned')
+          scanMessage.includes('created') || scanMessage.includes('Successfully')
             ? 'dark:bg-[#bbf246]/10 bg-lime-500/15 border-lime-600/40 text-lime-900 dark:text-[#bbf246]'
             : 'bg-rose-500/10 border-rose-500/30 text-rose-500 dark:text-rose-400'
         }`}>
@@ -121,9 +122,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* 4 Top KPI Cards (Matching Image Grid & Gauge Ring) */}
+      {/* 4 Top KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Net Tasks */}
+        {/* KPI 1: Pending Tasks */}
         <div className="p-5 rounded-2xl dark:bg-[#1c2027] bg-white border dark:border-white/[0.07] border-slate-300 shadow-sm space-y-3">
           <div className="text-xs font-semibold dark:text-slate-400 text-slate-600">
             Pending Coursework
@@ -133,7 +134,7 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-[#a4dc32]">
             <TrendingUp size={13} />
-            <span>{pendingTasks.length} active items</span>
+            <span>{pendingTasks.length} active item{pendingTasks.length === 1 ? '' : 's'}</span>
           </div>
         </div>
 
@@ -147,25 +148,25 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-[#a4dc32]">
             <TrendingUp size={13} />
-            <span>{tasks.length > 0 ? `${completionRate}% of all tasks` : 'No tasks finished yet'}</span>
+            <span>{tasks.length > 0 ? `${completionRate}% completed` : '0 finished'}</span>
           </div>
         </div>
 
-        {/* KPI 3: Semester Goal with Radial Gauge Ring (Quarterly Revenue Goal in Image!) */}
+        {/* KPI 3: Semester Progress with Real Half-Circle Gauge */}
         <div className="p-5 rounded-2xl dark:bg-[#1c2027] bg-white border dark:border-white/[0.07] border-slate-300 shadow-sm flex items-center justify-between">
           <div className="space-y-3">
             <div className="text-xs font-semibold dark:text-slate-400 text-slate-600">
-              Semester Goal
+              Completion Rate
             </div>
             <div className="text-2xl md:text-3xl font-extrabold dark:text-white text-slate-900 tracking-tight">
               {completionRate}%
             </div>
             <div className="text-[11px] dark:text-slate-400 text-slate-600 font-medium">
-              Target: 100% on-time
+              {completedTasks.length} of {tasks.length} tasks done
             </div>
           </div>
 
-          {/* Half-Circle Gauge SVG (Matching Reference Image) */}
+          {/* Half-Circle Gauge SVG (Calculated strictly from real progress) */}
           <div className="w-20 h-14 relative flex items-end justify-center overflow-hidden">
             <svg viewBox="0 0 100 50" className="w-full h-full overflow-visible">
               <path
@@ -176,15 +177,17 @@ export default function Dashboard() {
                 strokeWidth="10"
                 strokeLinecap="round"
               />
-              <path
-                d="M 10 50 A 40 40 0 0 1 90 50"
-                fill="none"
-                stroke="#bbf246"
-                strokeWidth="10"
-                strokeLinecap="round"
-                strokeDasharray="125.6"
-                strokeDashoffset={125.6 * (1 - completionRate / 100)}
-              />
+              {tasks.length > 0 && completionRate > 0 && (
+                <path
+                  d="M 10 50 A 40 40 0 0 1 90 50"
+                  fill="none"
+                  stroke="#bbf246"
+                  strokeWidth="10"
+                  strokeLinecap="round"
+                  strokeDasharray="125.6"
+                  strokeDashoffset={125.6 * (1 - completionRate / 100)}
+                />
+              )}
             </svg>
           </div>
         </div>
@@ -192,7 +195,7 @@ export default function Dashboard() {
         {/* KPI 4: Upcoming Deadlines */}
         <div className="p-5 rounded-2xl dark:bg-[#1c2027] bg-white border dark:border-white/[0.07] border-slate-300 shadow-sm space-y-3">
           <div className="text-xs font-semibold dark:text-slate-400 text-slate-600">
-            Due Soon (72h)
+            Due Soon (High Urgency)
           </div>
           <div className="text-2xl md:text-3xl font-extrabold dark:text-white text-slate-900 tracking-tight">
             {dueSoonTasks.length}
@@ -204,7 +207,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Middle Section: Donut Breakdown + Wave Chart */}
+      {/* Middle Section: Donut Breakdown + Progress Metrics */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left: Coursework Overview with Donut Chart (7 cols) */}
         <div className="lg:col-span-7 p-6 rounded-2xl dark:bg-[#1c2027] bg-white border dark:border-white/[0.07] border-slate-300 shadow-sm flex flex-col justify-between">
@@ -218,10 +221,11 @@ export default function Dashboard() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-6 items-center py-3">
-            {/* Donut Chart SVG (Matching Image) */}
+            {/* Donut Chart SVG (Strictly dynamic with real data) */}
             <div className="sm:col-span-5 flex flex-col items-center justify-center">
               <div className="relative w-36 h-36 flex items-center justify-center">
                 <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
+                  {/* Background Track */}
                   <circle
                     cx="50"
                     cy="50"
@@ -231,47 +235,37 @@ export default function Dashboard() {
                     className="dark:text-[#232731] text-slate-300"
                     strokeWidth="14"
                   />
-                  {/* Segment 1: Lime */}
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="40"
-                    fill="transparent"
-                    stroke="#bbf246"
-                    strokeWidth="14"
-                    strokeDasharray="251.2"
-                    strokeDashoffset="120"
-                    strokeLinecap="round"
-                  />
-                  {/* Segment 2: Emerald */}
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="40"
-                    fill="transparent"
-                    stroke="#10b981"
-                    strokeWidth="14"
-                    strokeDasharray="251.2"
-                    strokeDashoffset="180"
-                    strokeLinecap="round"
-                  />
+                  {/* Real Completed Progress Arc */}
+                  {tasks.length > 0 && completionRate > 0 && (
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      fill="transparent"
+                      stroke="#bbf246"
+                      strokeWidth="14"
+                      strokeDasharray="251.2"
+                      strokeDashoffset={251.2 * (1 - completionRate / 100)}
+                      strokeLinecap="round"
+                    />
+                  )}
                 </svg>
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
                   <span className="text-lg font-extrabold dark:text-white text-slate-900 tracking-tight">
                     {completionRate}%
                   </span>
                   <span className="text-[10px] dark:text-slate-400 text-slate-600 font-semibold">
-                    On Track
+                    {tasks.length > 0 ? (completionRate >= 50 ? 'On Track' : 'In Progress') : 'No Tasks'}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Middle Stat Box + Legend (Matching Image) */}
+            {/* Middle Stat Box + Legend */}
             <div className="sm:col-span-7 space-y-4">
               <div className="flex items-center gap-3 p-3 rounded-xl dark:bg-[#232832] bg-slate-100 border dark:border-transparent border-slate-300">
                 <div className="w-8 h-8 rounded-lg dark:bg-[#bbf246]/20 bg-[#aee637]/30 text-emerald-800 dark:text-[#a4dc32] border border-[#8fc91c]/30 dark:border-transparent flex items-center justify-center font-bold text-xs">
-                  $
+                  <GraduationCap size={16} />
                 </div>
                 <div>
                   <div className="text-[10px] dark:text-slate-400 text-slate-600 uppercase font-mono font-bold">
@@ -286,7 +280,7 @@ export default function Dashboard() {
               {/* Dynamic Course Categories */}
               {topCourses.length === 0 ? (
                 <div className="p-3 rounded-xl border border-dashed dark:border-white/10 border-slate-300 text-center text-xs dark:text-slate-400 text-slate-500">
-                  No courses ingested yet. Add a task or scan your inbox.
+                  No courses detected yet. Connect Gmail or add tasks.
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-3 text-xs">
@@ -310,7 +304,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right: Wave Chart + Mini Pills (5 cols) */}
+        {/* Right: Real Status Cards & Progress */}
         <div className="lg:col-span-5 space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="p-3.5 rounded-2xl dark:bg-[#1c2027] bg-white border dark:border-white/[0.07] border-slate-300 shadow-sm">
@@ -330,8 +324,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Glowing Wave Chart Card (Total Profit Card in Image) */}
-          <div className="p-5 rounded-2xl dark:bg-[#1c2027] bg-white border dark:border-white/[0.07] border-slate-300 shadow-sm space-y-2">
+          {/* Real Task Completion Momentum Card */}
+          <div className="p-5 rounded-2xl dark:bg-[#1c2027] bg-white border dark:border-white/[0.07] border-slate-300 shadow-sm space-y-3">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs font-bold dark:text-white text-slate-900">
@@ -342,45 +336,29 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="text-sm font-extrabold text-emerald-700 dark:text-[#bbf246]">
-                +{completedTasks.length} Done
+                {completedTasks.length} / {tasks.length} Done
               </div>
             </div>
 
-            {/* Glowing Smooth Wave SVG */}
-            <div className="h-28 w-full pt-2">
-              <svg viewBox="0 0 300 100" className="w-full h-full overflow-visible">
-                <defs>
-                  <linearGradient id="waveGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#8fc91c" stopOpacity="0.4" />
-                    <stop offset="100%" stopColor="#8fc91c" stopOpacity="0.0" />
-                  </linearGradient>
-                </defs>
-
-                {/* Shaded Area */}
-                <path
-                  d="M 0,80 Q 40,90 70,60 T 140,50 T 210,20 T 300,30 L 300,100 L 0,100 Z"
-                  fill="url(#waveGradient)"
+            {/* Real Progress Bar */}
+            <div className="space-y-1.5 pt-1">
+              <div className="h-3 w-full rounded-full dark:bg-[#252a36] bg-slate-200 overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-emerald-500 to-[#bbf246] transition-all duration-500 rounded-full"
+                  style={{ width: `${completionRate}%` }}
                 />
-
-                {/* Smooth Glowing Stroke Line */}
-                <path
-                  d="M 0,80 Q 40,90 70,60 T 140,50 T 210,20 T 300,30"
-                  fill="none"
-                  stroke="#7cb518"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                />
-
-                {/* Highlight Dot */}
-                <circle cx="210" cy="20" r="4" fill="#ffffff" stroke="#7cb518" strokeWidth="2.5" />
-                <circle cx="70" cy="60" r="3" fill="#7cb518" />
-              </svg>
+              </div>
+              <div className="flex justify-between text-[10px] text-slate-500 dark:text-slate-400 font-medium">
+                <span>0%</span>
+                <span>{completionRate}% Completed</span>
+                <span>100%</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Bottom Section: Customer List / Recent Coursework + Pro Promo Card */}
+      {/* Bottom Section: Recent Coursework + User Plan Assistant Card */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left: Recent Tasks Table (7 cols) */}
         <div className="lg:col-span-7 p-6 rounded-2xl dark:bg-[#1c2027] bg-white border dark:border-white/[0.07] border-slate-300 shadow-sm flex flex-col justify-between">
@@ -398,7 +376,7 @@ export default function Dashboard() {
               <div className="py-8 text-center text-xs dark:text-slate-400 text-slate-500 font-medium">Loading tasks...</div>
             ) : tasks.length === 0 ? (
               <div className="py-8 text-center text-xs dark:text-slate-400 text-slate-500 font-medium">
-                No tasks found. Click "Scan Academic Emails" below.
+                No tasks found. Click "Scan Academic Emails" or add tasks manually.
               </div>
             ) : (
               <div className="space-y-3">
@@ -465,9 +443,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Right: Premium Plan Promo Card (Matching $30 Card in Reference Image!) */}
+        {/* Right: Academic Assistant Card */}
         <div className="lg:col-span-5 p-6 rounded-2xl dark:bg-gradient-to-br dark:from-[#1c2918] dark:via-[#152014] dark:to-[#121915] bg-gradient-to-br from-[#1f2820] via-[#172118] to-[#131b15] border border-[#bbf246]/30 dark:border-[#bbf246]/20 shadow-xl flex flex-col justify-between relative overflow-hidden">
-          {/* Subtle Ambient Radial Glow */}
           <div className="absolute top-0 right-0 w-44 h-44 bg-[#bbf246]/10 blur-3xl rounded-full pointer-events-none" />
 
           <div className="space-y-4 relative z-10">
@@ -483,20 +460,17 @@ export default function Dashboard() {
 
             <div>
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl md:text-4xl font-extrabold text-white tracking-tight">
-                  $0
-                </span>
-                <span className="text-xs text-slate-300 font-medium">
-                  Free Student Plan
+                <span className="text-2xl md:text-3xl font-extrabold text-white tracking-tight uppercase">
+                  {user?.tier === 'pro' ? 'Pro Member' : 'Student Plan'}
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                Connect your inbox to automatically parse syllabi and deadlines into your personal focus list.
+                Connect your university Google inbox to automatically parse upcoming homework assignments, project due dates, and exam schedules.
               </p>
             </div>
           </div>
 
-          {/* Action Button (Matching Glowing Neon Lime Button in Image) */}
+          {/* Action Button */}
           <div className="pt-6 relative z-10 flex items-center gap-2">
             <button
               onClick={handleScanEmails}

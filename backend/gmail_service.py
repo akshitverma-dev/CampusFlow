@@ -1,5 +1,7 @@
 import base64
+import html
 import json
+import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
@@ -61,13 +63,44 @@ def decrypt_credentials(encrypted: str) -> Credentials:
     return Credentials.from_authorized_user_info(data, GMAIL_SCOPES)
 
 
-def _decode_body(payload: dict) -> str:
-    if payload.get("body", {}).get("data"):
-        return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
-    for part in payload.get("parts", []):
-        body = _decode_body(part)
-        if body:
-            return body
+def _clean_html_text(raw_html: str) -> str:
+    if not raw_html:
+        return ""
+    # Strip script and style blocks
+    cleaned = re.sub(r'<(style|script)[^>]*>.*?</\1>', ' ', raw_html, flags=re.DOTALL | re.IGNORECASE)
+    # Convert paragraph and break tags to newlines
+    cleaned = re.sub(r'<(br|p|div|tr)[^>]*>', '\n', cleaned, flags=re.IGNORECASE)
+    # Strip remaining HTML tags
+    cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
+    # Decode HTML entities
+    cleaned = html.unescape(cleaned)
+    # Clean up whitespace
+    cleaned = re.sub(r'[ \t]+', ' ', cleaned)
+    cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned).strip()
+    return cleaned
+
+
+def _extract_body_text(payload: dict) -> str:
+    mime = payload.get("mimeType", "")
+    data = payload.get("body", {}).get("data")
+    if data:
+        decoded = base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+        return decoded.strip() if mime == "text/plain" else _clean_html_text(decoded)
+
+    parts = payload.get("parts", [])
+    # 1. Prefer text/plain first
+    for part in parts:
+        if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
+            decoded = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8", errors="replace")
+            if decoded.strip():
+                return decoded.strip()
+
+    # 2. Recurse down sub-parts
+    for part in parts:
+        text = _extract_body_text(part)
+        if text.strip():
+            return text.strip()
+
     return ""
 
 
@@ -79,20 +112,69 @@ def fetch_all_messages(encrypted_credentials: str, max_messages: int = 20) -> li
     credentials = decrypt_credentials(encrypted_credentials)
     service = build("gmail", "v1", credentials=credentials, cache_discovery=False)
     messages: list[dict] = []
-    page_token = None
-    while True:
-        result = service.users().messages().list(userId="me", pageToken=page_token, maxResults=100, q="in:anywhere").execute()
-        for item in result.get("messages", []):
-            message = service.users().messages().get(userId="me", id=item["id"], format="full").execute()
-            payload = message.get("payload", {})
-            raw_date = _header(payload, "Date")
-            try:
-                timestamp = parsedate_to_datetime(raw_date).astimezone(timezone.utc) if raw_date else datetime.now(timezone.utc)
-            except (TypeError, ValueError, OverflowError):
-                timestamp = datetime.now(timezone.utc)
-            messages.append({"external_id": message["id"], "sender": _header(payload, "From") or "unknown", "subject": _header(payload, "Subject"), "raw_body": _decode_body(payload), "timestamp": timestamp})
-            if len(messages) >= max_messages:
-                return messages
-        page_token = result.get("nextPageToken")
-        if not page_token:
-            return messages
+    seen_ids: set[str] = set()
+
+    # Prioritize academic & course emails first, filtering out system/promotional noise
+    queries = [
+        (
+            "-from:google.com -from:accounts.google.com -category:promotions -category:social -category:spam "
+            "(assignment OR homework OR project OR exam OR quiz OR syllabus OR due OR deadline OR submission OR lab OR course OR lecture OR midterm OR practical OR viva OR class)"
+        ),
+        "-from:google.com -from:accounts.google.com -category:promotions -category:social -category:spam"
+    ]
+
+    for q in queries:
+        page_token = None
+        while len(messages) < max_messages:
+            result = service.users().messages().list(
+                userId="me", 
+                pageToken=page_token, 
+                maxResults=min(50, max_messages * 3), 
+                q=q
+            ).execute()
+            
+            raw_items = result.get("messages", [])
+            if not raw_items:
+                break
+                
+            for item in raw_items:
+                msg_id = item["id"]
+                if msg_id in seen_ids:
+                    continue
+                seen_ids.add(msg_id)
+                
+                message = service.users().messages().get(userId="me", id=msg_id, format="full").execute()
+                payload = message.get("payload", {})
+                from_header = _header(payload, "From")
+                
+                # Double check to skip Google security alerts or system noise
+                lower_from = from_header.lower()
+                if "no-reply@accounts.google.com" in lower_from or "accounts.google.com" in lower_from:
+                    continue
+
+                raw_date = _header(payload, "Date")
+                try:
+                    timestamp = parsedate_to_datetime(raw_date).astimezone(timezone.utc) if raw_date else datetime.now(timezone.utc)
+                except (TypeError, ValueError, OverflowError):
+                    timestamp = datetime.now(timezone.utc)
+
+                body_text = _extract_body_text(payload)
+                messages.append({
+                    "external_id": msg_id,
+                    "sender": from_header or "unknown",
+                    "subject": _header(payload, "Subject"),
+                    "raw_body": body_text,
+                    "timestamp": timestamp
+                })
+                
+                if len(messages) >= max_messages:
+                    return messages
+
+            page_token = result.get("nextPageToken")
+            if not page_token:
+                break
+
+        if len(messages) >= max_messages:
+            break
+
+    return messages

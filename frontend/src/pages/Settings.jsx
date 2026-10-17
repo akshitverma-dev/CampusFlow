@@ -14,38 +14,22 @@ import {
 } from 'lucide-react'
 import { emailApi, gmailApi } from '../services/api'
 
-const SAMPLE_EMAIL = {
-  sender: 'Prof. David Vance <vance@cs.university.edu>',
-  body: `Dear CS301 Students,
-
-Please make sure your Project 2 GitHub repositories are pushed before this Friday at 11:59 PM. Late submissions will receive a 10% penalty per day.
-
-Also, our midterm Lab Exam will be held next Tuesday from 2:00 PM to 4:00 PM in Computer Lab Hall B. Attendance is mandatory.
-
-Best regards,
-Prof. Vance`
-}
-
 export default function Settings({ user }) {
   const [body, setBody] = useState('')
   const [sender, setSender] = useState('')
   const [status, setStatus] = useState('')
   const [busy, setBusy] = useState(false)
   const [gmailInfo, setGmailInfo] = useState({
-    connected: true,
-    source: 'simulated',
-    has_personal: false,
-    description: 'Instant AI Academic Scanner Active'
+    connected: false,
+    oauth_configured: true,
   })
 
   const loadStatus = () => {
     gmailApi.status()
       .then(({ data }) => setGmailInfo(data))
       .catch(() => setGmailInfo({
-        connected: true,
-        source: 'simulated',
-        has_personal: false,
-        description: 'Instant AI Academic Scanner Active'
+        connected: false,
+        oauth_configured: false
       }))
   }
 
@@ -68,7 +52,7 @@ export default function Settings({ user }) {
     setStatus('')
     try {
       await gmailApi.disconnect()
-      setStatus('Personal Gmail disconnected. Switched to shared/instant academic scanner.')
+      setStatus('Personal Gmail disconnected successfully.')
       loadStatus()
     } catch {
       setStatus('Could not disconnect Gmail.')
@@ -111,11 +95,6 @@ export default function Settings({ user }) {
     }
   }
 
-  const fillSampleEmail = () => {
-    setSender(SAMPLE_EMAIL.sender)
-    setBody(SAMPLE_EMAIL.body)
-  }
-
   return (
     <div className="space-y-6 select-none">
       {/* Header */}
@@ -124,7 +103,7 @@ export default function Settings({ user }) {
           Settings & Email Ingestion
         </h1>
         <p className="text-xs dark:text-slate-400 text-slate-600 mt-1">
-          Configure automated email synchronization, manual syllabus parsing, and account preferences.
+          Connect your Google account via OAuth to scan course announcements, assignments, and exam deadlines.
         </p>
       </div>
 
@@ -160,7 +139,7 @@ export default function Settings({ user }) {
                   Academic Email Ingestion
                 </h2>
                 <p className="text-xs dark:text-slate-400 text-slate-600">
-                  CampusFlow reads course announcements and automatically converts deadlines into tasks.
+                  CampusFlow connects securely with Google OAuth to identify coursework deadlines and exam alerts.
                 </p>
               </div>
             </div>
@@ -169,36 +148,36 @@ export default function Settings({ user }) {
             <div className="p-4 rounded-xl dark:bg-[#232832] bg-slate-100 border dark:border-transparent border-slate-300 space-y-2">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#8fc91c] dark:bg-[#bbf246] animate-pulse" />
-                  <span className="font-bold text-xs dark:text-[#bbf246] text-emerald-900">
-                    {gmailInfo.has_personal
-                      ? 'Personal Gmail Account Connected'
-                      : (gmailInfo.is_shared
-                          ? 'CampusFlow Shared Academic Mailbox Active'
-                          : 'Instant AI Academic Scanner Active')}
+                  <span className={`w-2.5 h-2.5 rounded-full ${gmailInfo.connected ? 'bg-[#8fc91c] dark:bg-[#bbf246] animate-pulse' : 'bg-slate-400'}`} />
+                  <span className={`font-bold text-xs ${gmailInfo.connected ? 'dark:text-[#bbf246] text-emerald-900' : 'text-slate-700 dark:text-slate-300'}`}>
+                    {gmailInfo.connected ? 'Personal Gmail Account Connected' : 'Gmail Not Connected'}
                   </span>
                 </div>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded-full dark:bg-[#bbf246]/10 bg-lime-500/15 text-emerald-900 dark:text-[#a4dc32] border border-[#8fc91c]/30 font-bold">
-                  {gmailInfo.has_personal ? 'Personal OAuth' : 'Zero OAuth Required'}
+                  {gmailInfo.connected ? 'Authenticated via OAuth' : 'OAuth Required'}
                 </span>
               </div>
               <p className="text-xs dark:text-slate-400 text-slate-600 leading-relaxed">
-                {gmailInfo.description || 'You can scan coursework emails directly without individual Google OAuth setup.'}
+                {gmailInfo.connected 
+                  ? 'Your Gmail account is securely linked with read-only permissions. Click "Scan Academic Emails" to scan your recent coursework messages.'
+                  : 'Click "Link Personal Gmail" to authenticate with Google. Only read-only access to your emails is requested.'}
               </p>
             </div>
 
             {/* Action Buttons */}
             <div className="flex flex-wrap items-center gap-3 pt-1">
-              <button
-                disabled={busy}
-                onClick={syncGmail}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#aee637] dark:bg-[#bbf246] hover:bg-[#9ed929] dark:hover:bg-[#aee83b] text-[#0f172a] dark:text-[#111317] border border-[#8fc91c] dark:border-transparent font-bold text-xs shadow-md shadow-[#8fc91c]/20 transition-all cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
-                <span>{busy ? 'Scanning...' : 'Scan Academic Emails'}</span>
-              </button>
+              {gmailInfo.connected && (
+                <button
+                  disabled={busy}
+                  onClick={syncGmail}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#aee637] dark:bg-[#bbf246] hover:bg-[#9ed929] dark:hover:bg-[#aee83b] text-[#0f172a] dark:text-[#111317] border border-[#8fc91c] dark:border-transparent font-bold text-xs shadow-md shadow-[#8fc91c]/20 transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
+                  <span>{busy ? 'Scanning...' : 'Scan Academic Emails'}</span>
+                </button>
+              )}
 
-              {gmailInfo.has_personal ? (
+              {gmailInfo.connected ? (
                 <button
                   disabled={busy}
                   onClick={disconnectGmail}
@@ -210,10 +189,10 @@ export default function Settings({ user }) {
               ) : (
                 <button
                   onClick={connectGmail}
-                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl dark:bg-[#232832] bg-slate-100 hover:bg-slate-200 dark:hover:bg-white/10 dark:text-slate-300 text-slate-800 border dark:border-transparent border-slate-300 text-xs font-bold transition-colors cursor-pointer shadow-sm"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#aee637] dark:bg-[#bbf246] hover:bg-[#9ed929] dark:hover:bg-[#aee83b] text-[#0f172a] dark:text-[#111317] border border-[#8fc91c] dark:border-transparent font-bold text-xs shadow-md shadow-[#8fc91c]/20 transition-all cursor-pointer"
                 >
                   <ExternalLink size={14} />
-                  <span>Link Personal Gmail (Optional)</span>
+                  <span>Link Personal Gmail via OAuth</span>
                 </button>
               )}
             </div>
@@ -235,14 +214,6 @@ export default function Settings({ user }) {
                   </p>
                 </div>
               </div>
-
-              <button
-                type="button"
-                onClick={fillSampleEmail}
-                className="text-xs font-bold text-emerald-700 dark:text-[#a4dc32] hover:underline cursor-pointer"
-              >
-                Pre-fill sample email
-              </button>
             </div>
 
             <form onSubmit={syncManual} className="space-y-3.5 pt-1 text-xs">
@@ -267,7 +238,7 @@ export default function Settings({ user }) {
                 <textarea
                   required
                   rows={4}
-                  placeholder="Paste the full email text here with assignment due dates, quiz alerts, etc."
+                  placeholder="Paste email text here (e.g. 'CS101: Assignment 2 is due Friday at 11:59 PM. Midterm exam is next Tuesday in Hall B...')"
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl dark:bg-[#232832] bg-slate-100 border dark:border-white/5 border-slate-300 dark:text-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-[#8fc91c] dark:focus:ring-[#bbf246] resize-y"
@@ -308,13 +279,13 @@ export default function Settings({ user }) {
               <div className="flex items-center justify-between">
                 <span className="dark:text-slate-400 text-slate-600 font-medium">Plan:</span>
                 <span className="font-bold text-emerald-900 dark:text-[#a4dc32] uppercase font-mono text-[10px] px-2 py-0.5 rounded bg-lime-500/15 dark:bg-[#bbf246]/10 border border-[#8fc91c]/30">
-                  {user?.tier || 'Free Tier'}
+                  {user?.tier === 'pro' ? 'Pro Tier' : 'Free Tier'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="dark:text-slate-400 text-slate-600 font-medium">Daily Scan Limit:</span>
                 <span className="font-bold dark:text-slate-200 text-slate-900 font-mono">
-                  {user?.daily_limit || 5} emails / day
+                  {user?.tier === 'pro' ? '20' : (user?.daily_limit || 5)} emails / day
                 </span>
               </div>
             </div>
